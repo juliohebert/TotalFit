@@ -47,6 +47,7 @@ export const authService = {
     }
     if (response.data.usuario) {
       localStorage.setItem('totalfit_user', JSON.stringify(response.data.usuario));
+      localStorage.setItem('userId', response.data.usuario.id);
     }
     return response.data;
   },
@@ -58,6 +59,7 @@ export const authService = {
     }
     if (response.data.usuario) {
       localStorage.setItem('totalfit_user', JSON.stringify(response.data.usuario));
+      localStorage.setItem('userId', response.data.usuario.id);
     }
     return response.data;
   },
@@ -65,6 +67,7 @@ export const authService = {
   logout: () => {
     localStorage.removeItem('totalfit_token');
     localStorage.removeItem('totalfit_user');
+    localStorage.removeItem('userId');
   },
 
   getCurrentUser: () => {

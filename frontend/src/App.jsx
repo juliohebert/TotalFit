@@ -13,6 +13,7 @@ import Diet from './pages/Diet';
 import AddFood from './pages/AddFood';
 import Workouts from './pages/Workouts';
 import Progress from './pages/Progress';
+import ExploreWorkouts from './pages/ExploreWorkouts';
 import './App.css';
 
 function App() {
@@ -56,6 +57,9 @@ function App() {
           
           {/* Workouts */}
           <Route path="/treinos" element={<PrivateRoute><Workouts /></PrivateRoute>} />
+          
+          {/* Explore Workouts */}
+          <Route path="/treinos/explorar" element={<PrivateRoute><ExploreWorkouts /></PrivateRoute>} />
           
           {/* Progress */}
           <Route path="/progresso" element={<PrivateRoute><Progress /></PrivateRoute>} />

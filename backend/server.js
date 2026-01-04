@@ -65,8 +65,8 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' })); // Aumentar limite para suportar imagens Base64
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Middleware de logging simples
 app.use((req, res, next) => {
@@ -957,6 +957,20 @@ app.get('/api/nutricao/resumo/:usuarioId/:data', async (req, res) => {
   try {
     const { usuarioId, data } = req.params;
     
+    // Buscar metas do usuário
+    const usuario = await pool.query(
+      `SELECT meta_calorias, meta_proteinas, meta_carboidratos, meta_gorduras, meta_agua 
+       FROM usuarios WHERE id = $1`,
+      [usuarioId]
+    );
+
+    // Usar metas do usuário ou valores padrão vazios (null)
+    const metaCalorias = usuario.rows[0]?.meta_calorias || null;
+    const metaProteinas = usuario.rows[0]?.meta_proteinas || null;
+    const metaCarboidratos = usuario.rows[0]?.meta_carboidratos || null;
+    const metaGorduras = usuario.rows[0]?.meta_gorduras || null;
+    const metaAgua = usuario.rows[0]?.meta_agua || null;
+    
     // Buscar refeições do dia
     const refeicoes = await pool.query(
       `SELECT * FROM refeicoes 
@@ -978,10 +992,6 @@ app.get('/api/nutricao/resumo/:usuarioId/:data', async (req, res) => {
       totalGorduras += parseFloat(ref.gorduras || 0);
     });
 
-    // Meta diária (pode vir de uma tabela de configurações do usuário)
-    const metaCalorias = 2500;
-    const metaAgua = 2500;
-
     // Buscar hidratação do dia
     const hidratacao = await pool.query(
       `SELECT COALESCE(SUM(quantidade), 0) as total 
@@ -994,12 +1004,17 @@ app.get('/api/nutricao/resumo/:usuarioId/:data', async (req, res) => {
       calorias: {
         consumido: Math.round(totalCalorias),
         meta: metaCalorias,
-        restante: metaCalorias - Math.round(totalCalorias)
+        restante: metaCalorias ? metaCalorias - Math.round(totalCalorias) : null
       },
       macros: {
         proteinas: Math.round(totalProteinas),
         carboidratos: Math.round(totalCarboidratos),
-        gorduras: Math.round(totalGorduras)
+        gorduras: Math.round(totalGorduras),
+        metas: {
+          proteinas: metaProteinas,
+          carboidratos: metaCarboidratos,
+          gorduras: metaGorduras
+        }
       },
       hidratacao: {
         atual: parseInt(hidratacao.rows[0].total),
@@ -1099,8 +1114,228 @@ app.post('/api/nutricao/hidratacao', async (req, res) => {
 });
 
 // =====================================================
+// Rotas de Treinos Públicos (Explorar Treinos)
+// =====================================================
+
+// GET /api/treinos-publicos - Listar treinos públicos com filtros
+app.get('/api/treinos-publicos', async (req, res) => {
+  try {
+    const { busca, categoria, nivel, frequencia, usuario_id } = req.query;
+    
+    let query = `
+      SELECT 
+        tp.id,
+        tp.titulo,
+        tp.descricao,
+        tp.imagem_url,
+        tp.frequencia_semanal,
+        c.nome as categoria,
+        c.slug as categoria_slug,
+        n.nome as nivel,
+        n.slug as nivel_slug,
+        CASE WHEN tf.id IS NOT NULL THEN true ELSE false END as favorito
+      FROM treinos_publicos tp
+      LEFT JOIN categorias_treino c ON tp.categoria_id = c.id
+      LEFT JOIN niveis_treino n ON tp.nivel_id = n.id
+      LEFT JOIN treinos_favoritos tf ON tp.id = tf.treino_publico_id AND tf.usuario_id = $1
+      WHERE tp.ativo = true
+    `;
+    
+    const params = [usuario_id || null];
+    let paramIndex = 2;
+    
+    // Filtro de busca por texto
+    if (busca) {
+      query += ` AND (LOWER(tp.titulo) LIKE $${paramIndex} OR LOWER(tp.descricao) LIKE $${paramIndex})`;
+      params.push(`%${busca.toLowerCase()}%`);
+      paramIndex++;
+    }
+    
+    // Filtro por categoria
+    if (categoria && categoria !== 'todos') {
+      query += ` AND c.slug = $${paramIndex}`;
+      params.push(categoria);
+      paramIndex++;
+    }
+    
+    // Filtro por nível
+    if (nivel) {
+      query += ` AND n.slug = $${paramIndex}`;
+      params.push(nivel);
+      paramIndex++;
+    }
+    
+    // Filtro por frequência semanal
+    if (frequencia && frequencia !== 'all') {
+      query += ` AND tp.frequencia_semanal = $${paramIndex}`;
+      params.push(parseInt(frequencia));
+      paramIndex++;
+    }
+    
+    query += ' ORDER BY tp.criado_em DESC';
+    
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Erro ao buscar treinos públicos:', error);
+    res.status(500).json({ erro: 'Erro ao buscar treinos' });
+  }
+});
+
+// GET /api/categorias-treino - Listar categorias
+app.get('/api/categorias-treino', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM categorias_treino ORDER BY id');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Erro ao buscar categorias:', error);
+    res.status(500).json({ erro: 'Erro ao buscar categorias' });
+  }
+});
+
+// GET /api/niveis-treino - Listar níveis
+app.get('/api/niveis-treino', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM niveis_treino ORDER BY id');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Erro ao buscar níveis:', error);
+    res.status(500).json({ erro: 'Erro ao buscar níveis' });
+  }
+});
+
+// POST /api/treinos-favoritos/toggle - Toggle favorito
+app.post('/api/treinos-favoritos/toggle', async (req, res) => {
+  try {
+    const { usuario_id, treino_publico_id } = req.body;
+    
+    // Verificar se já existe
+    const checkResult = await pool.query(
+      'SELECT id FROM treinos_favoritos WHERE usuario_id = $1 AND treino_publico_id = $2',
+      [usuario_id, treino_publico_id]
+    );
+    
+    if (checkResult.rows.length > 0) {
+      // Remover favorito
+      await pool.query(
+        'DELETE FROM treinos_favoritos WHERE usuario_id = $1 AND treino_publico_id = $2',
+        [usuario_id, treino_publico_id]
+      );
+      res.json({ favorito: false, mensagem: 'Treino removido dos favoritos' });
+    } else {
+      // Adicionar favorito
+      await pool.query(
+        'INSERT INTO treinos_favoritos (usuario_id, treino_publico_id) VALUES ($1, $2)',
+        [usuario_id, treino_publico_id]
+      );
+      res.json({ favorito: true, mensagem: 'Treino adicionado aos favoritos' });
+    }
+  } catch (error) {
+    console.error('Erro ao toggle favorito:', error);
+    res.status(500).json({ erro: 'Erro ao atualizar favorito' });
+  }
+});
+
+// =====================================================
 // Error Handler
 // =====================================================
+
+// =====================================================
+// Rotas de Perfil de Usuário
+// =====================================================
+
+// GET /api/usuarios/:id - Buscar perfil do usuário
+app.get('/api/usuarios/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT id, nome, nome_exibicao, email, data_nascimento, telefone, peso, altura, gordura_corporal, meta_principal, foto_perfil, nivel, plano, meta_calorias, meta_proteinas, meta_carboidratos, meta_gorduras, meta_agua, criado_em, atualizado_em
+       FROM usuarios WHERE id = $1`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ erro: 'Usuário não encontrado' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao buscar perfil:', error);
+    res.status(500).json({ erro: 'Erro ao buscar perfil do usuário' });
+  }
+});
+
+// PUT /api/usuarios/:id - Atualizar perfil do usuário
+app.put('/api/usuarios/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      nome,
+      nome_exibicao,
+      data_nascimento,
+      telefone,
+      peso,
+      altura,
+      gordura_corporal,
+      meta_principal,
+      foto_perfil,
+      nivel,
+      plano,
+      meta_calorias,
+      meta_proteinas,
+      meta_carboidratos,
+      meta_gorduras,
+      meta_agua
+    } = req.body;
+
+    const result = await pool.query(
+      `UPDATE usuarios SET
+        nome = COALESCE($1, nome),
+        nome_exibicao = COALESCE($2, nome_exibicao),
+        data_nascimento = COALESCE($3, data_nascimento),
+        telefone = COALESCE($4, telefone),
+        peso = COALESCE($5, peso),
+        altura = COALESCE($6, altura),
+        gordura_corporal = COALESCE($7, gordura_corporal),
+        meta_principal = COALESCE($8, meta_principal),
+        foto_perfil = COALESCE($9, foto_perfil),
+        nivel = COALESCE($10, nivel),
+        plano = COALESCE($11, plano),
+        meta_calorias = COALESCE($12, meta_calorias),
+        meta_proteinas = COALESCE($13, meta_proteinas),
+        meta_carboidratos = COALESCE($14, meta_carboidratos),
+        meta_gorduras = COALESCE($15, meta_gorduras),
+        meta_agua = COALESCE($16, meta_agua),
+        atualizado_em = NOW()
+      WHERE id = $17
+      RETURNING id, nome, nome_exibicao, email, data_nascimento, telefone, peso, altura, gordura_corporal, meta_principal, foto_perfil, nivel, plano, meta_calorias, meta_proteinas, meta_carboidratos, meta_gorduras, meta_agua, criado_em, atualizado_em`,
+      [
+        nome,
+        nome_exibicao,
+        data_nascimento,
+        telefone,
+        peso,
+        altura,
+        gordura_corporal,
+        meta_principal,
+        foto_perfil,
+        nivel,
+        plano,
+        meta_calorias,
+        meta_proteinas,
+        meta_carboidratos,
+        meta_gorduras,
+        meta_agua,
+        id
+      ]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ erro: 'Usuário não encontrado' });
+    }
+    res.json({ mensagem: 'Perfil atualizado com sucesso', usuario: result.rows[0] });
+  } catch (error) {
+    console.error('Erro ao atualizar perfil:', error);
+    res.status(500).json({ erro: 'Erro ao atualizar perfil do usuário' });
+  }
+});
 
 app.use((err, req, res, next) => {
   console.error('Erro não tratado:', err);

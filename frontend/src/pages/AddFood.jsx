@@ -1,75 +1,43 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import axios from 'axios';
 
 function AddFood() {
   const navigate = useNavigate();
   const location = useLocation();
   const mealId = location.state?.mealId;
+  const userId = localStorage.getItem('userId');
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
   const [selectedFood, setSelectedFood] = useState(null);
   const [quantity, setQuantity] = useState(1);
-  const [unit, setUnit] = useState('unid');
+  const [unit, setUnit] = useState('gramas');
+  const [foods, setFoods] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Dados mockados (posteriormente virão do backend)
-  const [foods] = useState([
-    {
-      id: 1,
-      nome: 'Ovo Cozido',
-      descricao: 'Unidade média (50g)',
-      icon: 'egg',
-      calorias: 78,
-      proteina: 6,
-      carboidratos: 0.6,
-      gorduras: 5,
-      unidades: ['unid', 'gramas']
-    },
-    {
-      id: 2,
-      nome: 'Filé de Frango Grelhado',
-      descricao: '100g',
-      icon: 'set_meal',
-      calorias: 165,
-      proteina: 31,
-      carboidratos: 0,
-      gorduras: 3.6,
-      unidades: ['gramas']
-    },
-    {
-      id: 3,
-      nome: 'Arroz Branco Cozido',
-      descricao: '100g',
-      icon: 'rice_bowl',
-      calorias: 130,
-      proteina: 2.7,
-      carboidratos: 28,
-      gorduras: 0.3,
-      unidades: ['gramas', 'xícara']
-    },
-    {
-      id: 4,
-      nome: 'Brócolis Cozido',
-      descricao: '100g',
-      icon: 'nutrition',
-      calorias: 35,
-      proteina: 2.4,
-      carboidratos: 7,
-      gorduras: 0.4,
-      unidades: ['gramas']
-    },
-    {
-      id: 5,
-      nome: 'Café (sem açúcar)',
-      descricao: '100ml',
-      icon: 'local_cafe',
-      calorias: 2,
-      proteina: 0.1,
-      carboidratos: 0,
-      gorduras: 0,
-      unidades: ['ml', 'xícara']
+  useEffect(() => {
+    if (!userId) {
+      navigate('/login');
+      return;
     }
-  ]);
+  }, [userId, navigate]);
+
+  useEffect(() => {
+    const fetchFoods = async () => {
+      try {
+        // Buscar alimentos da API TACO ou banco de dados
+        // Por enquanto, retorna lista vazia - usuário precisa criar
+        setFoods([]);
+      } catch (error) {
+        console.error('Erro ao carregar alimentos:', error);
+        setFoods([]);
+      }
+      setLoading(false);
+    };
+
+    fetchFoods();
+  }, []);
 
   const categories = ['Todos', 'Proteínas', 'Carboidratos', 'Vegetais', 'Frutas', 'Favoritos'];
 

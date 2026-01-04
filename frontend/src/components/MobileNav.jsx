@@ -1,7 +1,8 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 function MobileNav() {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const navItems = [
     { path: '/dashboard', icon: 'grid_view', label: 'Início', fill: true },
@@ -12,9 +13,8 @@ function MobileNav() {
 
   const isActive = (path) => location.pathname === path;
 
-  const handleAdd = () => {
-    // TODO: Abrir modal de registro rápido
-    console.log('Adicionar registro');
+  const handleExplore = () => {
+    navigate('/treinos/explorar');
   };
 
   return (
@@ -34,13 +34,13 @@ function MobileNav() {
         </Link>
       ))}
 
-      {/* Central Add Button */}
+      {/* Central Explore Button */}
       <div className="relative -top-8">
         <button
-          onClick={handleAdd}
+          onClick={handleExplore}
           className="bg-primary text-slate-900 rounded-full size-14 flex items-center justify-center shadow-[0_0_15px_rgba(163,230,53,0.4)] border-4 border-surface hover:scale-105 transition-transform"
         >
-          <span className="material-symbols-outlined text-3xl">add</span>
+          <span className="material-symbols-outlined text-3xl">explore</span>
         </button>
       </div>
 

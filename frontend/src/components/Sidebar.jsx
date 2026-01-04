@@ -1,11 +1,32 @@
 import { Link, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import axios from 'axios';
 
 function Sidebar() {
   const location = useLocation();
+  const [userData, setUserData] = useState(null);
+  const userId = localStorage.getItem('userId');
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const res = await axios.get(`/api/usuarios/${userId}`);
+        console.log('Dados do usuário no Sidebar:', res.data);
+        setUserData(res.data);
+      } catch (error) {
+        console.error('Erro ao carregar dados do usuário:', error);
+      }
+    };
+
+    if (userId) {
+      fetchUserData();
+    }
+  }, [userId]);
 
   const menuItems = [
     { path: '/dashboard', icon: 'grid_view', label: 'Dashboard', fill: true },
     { path: '/treinos', icon: 'fitness_center', label: 'Treinos', fill: false },
+    { path: '/treinos/explorar', icon: 'explore', label: 'Explorar Treinos', fill: false },
     { path: '/dieta', icon: 'restaurant_menu', label: 'Dieta', fill: false },
     { path: '/progresso', icon: 'monitoring', label: 'Progresso', fill: false },
     { path: '/perfil', icon: 'account_circle', label: 'Perfil', fill: false },
@@ -59,12 +80,21 @@ function Sidebar() {
 
       {/* User Profile */}
       <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-800 border border-border-color">
-        <div className="size-10 rounded-full bg-gradient-to-br from-primary to-primary-hover flex items-center justify-center text-slate-900 font-bold">
-          AS
-        </div>
+        {userData?.foto_perfil ? (
+          <img 
+            src={userData.foto_perfil} 
+            alt={userData.nome_exibicao || userData.nome}
+            className="size-10 rounded-full object-cover"
+          />
+        ) : (
+          <div className="size-10 rounded-full bg-gradient-to-br from-primary to-primary-hover flex items-center justify-center text-slate-900 font-bold text-sm">
+            {userData?.nome?.charAt(0).toUpperCase() || 'U'}
+          </div>
+        )}
         <div className="flex flex-col overflow-hidden">
-          <p className="text-sm font-bold text-white truncate">Alex Silva</p>
-          <p className="text-xs text-primary truncate">Plano Pro</p>
+          <p className="text-sm font-bold text-white truncate">
+            {userData?.nome_exibicao || userData?.nome || 'Usuário'}
+          </p>
         </div>
       </div>
     </aside>

@@ -23,11 +23,16 @@ function CaloriesCard({ selectedDate }) {
       setDados(response);
     } catch (error) {
       console.error('Erro ao buscar dados nutricionais:', error);
-      // Dados padrão em caso de erro
+      // Dados vazios quando há erro ou usuário não configurou metas
       setDados({
-        calorias: { consumido: 0, meta: 2500, restante: 2500 },
-        macros: { proteinas: 0, carboidratos: 0, gorduras: 0 },
-        hidratacao: { atual: 0, meta: 2500 }
+        calorias: { consumido: 0, meta: null, restante: null },
+        macros: { 
+          proteinas: 0, 
+          carboidratos: 0, 
+          gorduras: 0,
+          metas: { proteinas: null, carboidratos: null, gorduras: null }
+        },
+        hidratacao: { atual: 0, meta: null }
       });
     } finally {
       setLoading(false);
@@ -39,6 +44,26 @@ function CaloriesCard({ selectedDate }) {
       <div className="flex flex-col gap-6">
         <div className="bg-surface rounded-2xl p-6 shadow-sm border border-border-color flex items-center justify-center h-64">
           <span className="material-symbols-outlined text-4xl text-primary animate-spin">progress_activity</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Se não tem meta configurada, mostrar estado vazio
+  if (!dados.calorias.meta) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="bg-surface rounded-2xl p-6 shadow-sm border border-border-color text-center">
+          <span className="material-symbols-outlined text-6xl text-text-secondary mb-4 block">restaurant_menu</span>
+          <h3 className="text-xl font-bold text-white mb-2">Configure suas metas</h3>
+          <p className="text-text-secondary mb-6">Defina suas metas nutricionais no perfil para acompanhar seu progresso</p>
+          <button 
+            onClick={() => window.location.href = '/perfil'}
+            className="px-6 py-3 rounded-xl bg-primary hover:bg-primary-hover text-slate-900 font-bold transition-all inline-flex items-center gap-2"
+          >
+            <span className="material-symbols-outlined">settings</span>
+            Ir para Perfil
+          </button>
         </div>
       </div>
     );

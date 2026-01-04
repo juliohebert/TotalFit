@@ -1,13 +1,36 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import Sidebar from '../components/Sidebar';
 import MobileNav from '../components/MobileNav';
 
 function Diet() {
   const location = useLocation();
   const navigate = useNavigate();
+  const userId = localStorage.getItem('userId');
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const [dietData, setDietData] = useState({
+    caloriasMeta: 2400,
+    caloriasConsumidas: 0,
+    macros: {
+      proteina: { consumido: 0, meta: 180 },
+      carboidratos: { consumido: 0, meta: 250 },
+      gorduras: { consumido: 0, meta: 70 }
+    },
+    refeicoes: []
+  });
+
+  const [openMeals, setOpenMeals] = useState([]);
+
+  useEffect(() => {
+    if (!userId) {
+      navigate('/login');
+      return;
+    }
+  }, [userId, navigate]);
 
   useEffect(() => {
     if (location.state?.message) {
@@ -18,70 +41,100 @@ function Diet() {
     }
   }, [location]);
 
-  // Dados mockados (posteriormente virão do backend)
-  const [dietData, setDietData] = useState({
-    caloriasMeta: 2400,
-    caloriasConsumidas: 1250,
-    macros: {
-      proteina: { consumido: 85, meta: 180 },
-      carboidratos: { consumido: 120, meta: 250 },
-      gorduras: { consumido: 35, meta: 70 }
-    },
-    refeicoes: [
-      {
-        id: 1,
-        nome: 'Café da Manhã',
-        horario: '07:30',
-        meta: 600,
-        consumido: 450,
-        icon: 'bakery_dining',
-        cor: 'orange',
-        alimentos: [
-          { nome: 'Ovos Mexidos', quantidade: '3 unidades grandes', calorias: 210, proteina: 18, carb: 2, gordura: 15 },
-          { nome: 'Pão Integral', quantidade: '2 fatias (50g)', calorias: 130, proteina: 6, carb: 24, gordura: 2 },
-          { nome: 'Café Preto', quantidade: '200ml • Sem açúcar', calorias: 5, proteina: 0, carb: 1, gordura: 0 }
-        ]
-      },
-      {
-        id: 2,
-        nome: 'Almoço',
-        horario: '12:30',
-        meta: 800,
-        consumido: 600,
-        icon: 'restaurant',
-        cor: 'blue',
-        alimentos: [
-          { nome: 'Peito de Frango Grelhado', quantidade: '150g', calorias: 240, proteina: 45, carb: 0, gordura: 5 },
-          { nome: 'Arroz Branco', quantidade: '150g (Cozido)', calorias: 195, proteina: 4, carb: 42, gordura: 0 }
-        ]
-      },
-      {
-        id: 3,
-        nome: 'Lanche da Tarde',
-        horario: '16:00',
-        meta: 300,
-        consumido: 200,
-        icon: 'egg_alt',
-        cor: 'yellow',
-        alimentos: [
-          { nome: 'Iogurte Natural', quantidade: '170g', calorias: 100, proteina: 6, carb: 8, gordura: 6 },
-          { nome: 'Maçã', quantidade: '1 unidade média', calorias: 95, proteina: 0, carb: 25, gordura: 0 }
-        ]
-      },
-      {
-        id: 4,
-        nome: 'Jantar',
-        horario: '20:00',
-        meta: 700,
-        consumido: 0,
-        icon: 'dinner_dining',
-        cor: 'indigo',
-        alimentos: []
-      }
-    ]
-  });
+  useEffect(() => {
+    const fetchDietData = async () => {
+      if (!userId) return;
+      
+      setLoading(true);
+      try {
+        const dateStr = selectedDate.toISOString().split('T')[0];
+        const res = await axios.get(`/api/nutricao/refeicoes/${userId}/${dateStr}`);
+        
+        // Calcular totais das refeições
+        let totalCalorias = 0;
+        let totalProteinas = 0;
+        let totalCarboidratos = 0;
+        let totalGorduras = 0;
 
-  const [openMeals, setOpenMeals] = useState([1]); // Café da manhã aberto por padrão
+        const refeicoesFormatadas = res.data.map(refeicao => {
+          const alimentos = refeicao.alimentos || [];
+          const caloriasRefeicao = alimentos.reduce((sum, a) => sum + (a.calorias || 0), 0);
+          
+          totalCalorias += caloriasRefeicao;
+          totalProteinas += refeicao.proteinas || 0;
+          totalCarboidratos += refeicao.carboidratos || 0;
+          totalGorduras += refeicao.gorduras || 0;
+
+          return {
+            id: refeicao.id,
+            nome: refeicao.nome,
+            horario: refeicao.horario || '00:00',
+            meta: 600, // Pode ser configurável no futuro
+            consumido: caloriasRefeicao,
+            icon: getIconForMealType(refeicao.tipo_refeicao || refeicao.nome),
+            cor: getColorForMealType(refeicao.tipo_refeicao || refeicao.nome),
+            alimentos: alimentos.map(a => ({
+              nome: a.nome,
+              quantidade: a.quantidade,
+              calorias: a.calorias || 0,
+              proteina: a.proteina || 0,
+              carb: a.carboidratos || 0,
+              gordura: a.gordura || 0
+            }))
+          };
+        });
+
+        setDietData({
+          caloriasMeta: 2400,
+          caloriasConsumidas: totalCalorias,
+          macros: {
+            proteina: { consumido: Math.round(totalProteinas), meta: 180 },
+            carboidratos: { consumido: Math.round(totalCarboidratos), meta: 250 },
+            gorduras: { consumido: Math.round(totalGorduras), meta: 70 }
+          },
+          refeicoes: refeicoesFormatadas
+        });
+      } catch (error) {
+        console.error('Erro ao carregar refeições:', error);
+        // Se erro, mantém dados vazios
+        setDietData({
+          caloriasMeta: 2400,
+          caloriasConsumidas: 0,
+          macros: {
+            proteina: { consumido: 0, meta: 180 },
+            carboidratos: { consumido: 0, meta: 250 },
+            gorduras: { consumido: 0, meta: 70 }
+          },
+          refeicoes: []
+        });
+      }
+      setLoading(false);
+    };
+
+    fetchDietData();
+  }, [userId, selectedDate]);
+
+  const getIconForMealType = (tipo) => {
+    const icons = {
+      'Café da Manhã': 'bakery_dining',
+      'Almoço': 'restaurant',
+      'Lanche': 'egg_alt',
+      'Jantar': 'dinner_dining',
+      'Ceia': 'nightlight'
+    };
+    return icons[tipo] || 'restaurant';
+  };
+
+  const getColorForMealType = (tipo) => {
+    const colors = {
+      'Café da Manhã': 'orange',
+      'Almoço': 'blue',
+      'Lanche': 'yellow',
+      'Jantar': 'indigo',
+      'Ceia': 'purple'
+    };
+    return colors[tipo] || 'blue';
+  };
 
   const toggleMeal = (mealId) => {
     setOpenMeals(prev => 
@@ -184,7 +237,13 @@ function Diet() {
 
         <div className="w-full max-w-5xl mx-auto p-4 lg:p-8 space-y-8 pb-24">
           {/* Summary Cards */}
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+          </div>
+        ) : (
+          <>
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Calorias Card */}
             <div className="bg-surface rounded-2xl shadow-sm border border-border-color p-6 flex flex-col justify-between relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
@@ -266,7 +325,21 @@ function Diet() {
 
           {/* Refeições */}
           <section className="space-y-4">
-            {dietData.refeicoes.map((refeicao) => {
+            {dietData.refeicoes.length === 0 ? (
+              <div className="bg-surface rounded-2xl border border-border-color shadow-sm p-12 text-center">
+                <span className="material-symbols-outlined text-6xl text-text-secondary mb-4 block">restaurant</span>
+                <h3 className="text-xl font-bold text-white mb-2">Nenhuma refeição registrada</h3>
+                <p className="text-text-secondary mb-6">Comece a registrar suas refeições para acompanhar sua nutrição</p>
+                <button 
+                  onClick={() => navigate('/dieta/adicionar')}
+                  className="px-6 py-3 rounded-xl bg-primary hover:bg-primary-hover text-slate-900 font-bold transition-all inline-flex items-center gap-2"
+                >
+                  <span className="material-symbols-outlined">add</span>
+                  Adicionar Refeição
+                </button>
+              </div>
+            ) : (
+              dietData.refeicoes.map((refeicao) => {
               const isOpen = openMeals.includes(refeicao.id);
               
               return (
@@ -340,8 +413,11 @@ function Diet() {
                   )}
                 </div>
               );
-            })}
+            })
+            )}
           </section>
+          </>
+        )}
         </div>
 
         {/* Floating Add Button (Mobile) */}

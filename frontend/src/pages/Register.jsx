@@ -65,7 +65,7 @@ function Register() {
       navigate('/dashboard');
     } catch (err) {
       console.error('Erro no cadastro:', err);
-      setError(err.response?.data?.error || 'Erro ao criar conta. Tente novamente.');
+      setError(err.response?.data?.erro || 'Erro ao criar conta. Tente novamente.');
     } finally {
       setLoading(false);
     }
