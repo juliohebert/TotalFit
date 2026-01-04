@@ -1,0 +1,407 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import pg from 'pg';
+
+// Configuração de variáveis de ambiente
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// =====================================================
+// Configuração do Pool de Conexão com Neon (PostgreSQL)
+// =====================================================
+const { Pool } = pg;
+
+// Validação: DATABASE_URL deve estar definida
+if (!process.env.DATABASE_URL) {
+  console.error('❌ ERRO CRÍTICO: DATABASE_URL não definida no arquivo .env');
+  console.error('👉 Configure o arquivo backend/.env com suas credenciais do Neon');
+  console.error('👉 Exemplo: DATABASE_URL=postgresql://user:password@host/database?sslmode=require');
+  process.exit(1);
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false // Necessário para Neon
+  },
+  // Configurações para Render Free Tier (evita timeout)
+  max: 10, // Máximo de conexões
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+});
+
+// Teste de conexão ao iniciar
+pool.query('SELECT NOW()', (err, res) => {
+  if (err) {
+    console.error('❌ Erro ao conectar no Neon:', err.message);
+    console.error('\n🔧 SOLUÇÃO:');
+    console.error('1. Acesse: https://console.neon.tech');
+    console.error('2. Copie a Connection String do seu projeto');
+    console.error('3. Cole no arquivo backend/.env na variável DATABASE_URL');
+    console.error('4. Reinicie o servidor: npm start\n');
+  } else {
+    console.log('✅ Conectado ao Neon PostgreSQL:', res.rows[0].now);
+  }
+});
+
+// =====================================================
+// Middlewares
+// =====================================================
+
+// CORS - Permite requisições do frontend na Vercel
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173', // Vercel ou local (Vite)
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Middleware de logging simples
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
+// =====================================================
+// Rotas de Saúde
+// =====================================================
+
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'TotalFit API está online! 💪',
+    version: '1.0.0',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/health', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT 1');
+    res.json({ 
+      status: 'healthy', 
+      database: 'connected',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'unhealthy', 
+      database: 'disconnected',
+      error: error.message 
+    });
+  }
+});
+
+// =====================================================
+// Rotas de Autenticação
+// =====================================================
+
+// POST /api/auth/register - Registrar novo usuário
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    // Validação básica
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'Todos os campos são obrigatórios' });
+    }
+
+    // Verificar se email já existe
+    const existingUser = await pool.query(
+      'SELECT id FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(409).json({ error: 'Email já cadastrado' });
+    }
+
+    // Hash de senha (implementar com bcryptjs depois)
+    const passwordHash = password; // TODO: bcrypt.hash(password, 10)
+
+    // Inserir usuário
+    const result = await pool.query(
+      'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email, created_at',
+      [name, email, passwordHash]
+    );
+
+    res.status(201).json({
+      message: 'Usuário criado com sucesso',
+      user: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Erro no registro:', error);
+    res.status(500).json({ error: 'Erro ao criar usuário' });
+  }
+});
+
+// POST /api/auth/login - Login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const result = await pool.query(
+      'SELECT id, name, email, password_hash FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Credenciais inválidas' });
+    }
+
+    const user = result.rows[0];
+
+    // TODO: Verificar senha com bcrypt
+    if (password !== user.password_hash) {
+      return res.status(401).json({ error: 'Credenciais inválidas' });
+    }
+
+    // TODO: Gerar JWT
+    res.json({
+      message: 'Login bem-sucedido',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email
+      }
+    });
+  } catch (error) {
+    console.error('Erro no login:', error);
+    res.status(500).json({ error: 'Erro ao fazer login' });
+  }
+});
+
+// =====================================================
+// Rotas de Exercícios
+// =====================================================
+
+// GET /api/exercises - Listar todos os exercícios
+app.get('/api/exercises', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM exercise_library ORDER BY muscle_group, name'
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Erro ao buscar exercícios:', error);
+    res.status(500).json({ error: 'Erro ao buscar exercícios' });
+  }
+});
+
+// GET /api/exercises/:id - Buscar exercício específico
+app.get('/api/exercises/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM exercise_library WHERE id = $1',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Exercício não encontrado' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao buscar exercício:', error);
+    res.status(500).json({ error: 'Erro ao buscar exercício' });
+  }
+});
+
+// =====================================================
+// Rotas de Treino (WorkoutSession)
+// =====================================================
+
+// GET /api/workout/last-weight/:userId/:exerciseId
+// CRÍTICO: Retorna a última carga utilizada para progressão
+app.get('/api/workout/last-weight/:userId/:exerciseId', async (req, res) => {
+  try {
+    const { userId, exerciseId } = req.params;
+
+    const result = await pool.query(
+      `SELECT weight_kg AS last_weight, reps AS last_reps, created_at AS last_workout_date
+       FROM workout_sets
+       WHERE user_id = $1 AND exercise_id = $2 AND completed = TRUE
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId, exerciseId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ 
+        last_weight: null, 
+        last_reps: null,
+        message: 'Primeira vez fazendo este exercício' 
+      });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao buscar última carga:', error);
+    res.status(500).json({ error: 'Erro ao buscar última carga' });
+  }
+});
+
+// POST /api/workout/session - Criar nova sessão de treino
+app.post('/api/workout/session', async (req, res) => {
+  try {
+    const { userId, exerciseId, sessionDate, dailyRoutineId } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO workout_session (user_id, exercise_id, session_date, daily_routine_id)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [userId, exerciseId, sessionDate, dailyRoutineId]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao criar sessão:', error);
+    res.status(500).json({ error: 'Erro ao criar sessão de treino' });
+  }
+});
+
+// POST /api/workout/set - Salvar série
+app.post('/api/workout/set', async (req, res) => {
+  try {
+    const { workoutSessionId, exerciseId, userId, setNumber, weightKg, reps, restSeconds } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO workout_sets 
+       (workout_session_id, exercise_id, user_id, set_number, weight_kg, reps, rest_seconds, completed)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
+       RETURNING *`,
+      [workoutSessionId, exerciseId, userId, setNumber, weightKg, reps, restSeconds]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao salvar série:', error);
+    res.status(500).json({ error: 'Erro ao salvar série' });
+  }
+});
+
+// =====================================================
+// Rotas de Dieta (MealLog)
+// =====================================================
+
+// POST /api/meal/log - Registrar refeição
+app.post('/api/meal/log', async (req, res) => {
+  try {
+    const { userId, mealName, mealDate, completed, dailyRoutineId } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO meal_log (user_id, meal_name, meal_date, completed, daily_routine_id, completed_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [userId, mealName, mealDate, completed, dailyRoutineId, completed ? new Date() : null]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao registrar refeição:', error);
+    res.status(500).json({ error: 'Erro ao registrar refeição' });
+  }
+});
+
+// PUT /api/meal/log/:id - Atualizar status da refeição (checkbox)
+app.put('/api/meal/log/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { completed } = req.body;
+
+    const result = await pool.query(
+      `UPDATE meal_log 
+       SET completed = $1, completed_at = $2
+       WHERE id = $3
+       RETURNING *`,
+      [completed, completed ? new Date() : null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Refeição não encontrada' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao atualizar refeição:', error);
+    res.status(500).json({ error: 'Erro ao atualizar refeição' });
+  }
+});
+
+// GET /api/meal/log/:userId/:date - Buscar refeições do dia
+app.get('/api/meal/log/:userId/:date', async (req, res) => {
+  try {
+    const { userId, date } = req.params;
+
+    const result = await pool.query(
+      `SELECT * FROM meal_log 
+       WHERE user_id = $1 AND meal_date = $2
+       ORDER BY id`,
+      [userId, date]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Erro ao buscar refeições:', error);
+    res.status(500).json({ error: 'Erro ao buscar refeições' });
+  }
+});
+
+// =====================================================
+// Rotas de Rotina Diária (DailyRoutine)
+// =====================================================
+
+// GET /api/routine/:userId/:date - Buscar rotina do dia
+app.get('/api/routine/:userId/:date', async (req, res) => {
+  try {
+    const { userId, date } = req.params;
+
+    const result = await pool.query(
+      `SELECT * FROM daily_routine 
+       WHERE user_id = $1 AND date = $2`,
+      [userId, date]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Rotina não encontrada para esta data' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Erro ao buscar rotina:', error);
+    res.status(500).json({ error: 'Erro ao buscar rotina' });
+  }
+});
+
+// =====================================================
+// Error Handler
+// =====================================================
+
+app.use((err, req, res, next) => {
+  console.error('Erro não tratado:', err);
+  res.status(500).json({ error: 'Erro interno do servidor' });
+});
+
+// =====================================================
+// Inicialização do Servidor
+// =====================================================
+
+app.listen(PORT, () => {
+  console.log(`🚀 TotalFit API rodando na porta ${PORT}`);
+  console.log(`📊 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM recebido. Fechando servidor...');
+  pool.end(() => {
+    console.log('Pool de conexões fechado');
+    process.exit(0);
+  });
+});
